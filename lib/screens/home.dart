@@ -22,7 +22,7 @@ class _HomeState extends State<Home> {
   final OpenWeatherService _service = OpenWeatherService();
   final TextEditingController _searchController = TextEditingController();
   final StreamController<List<ForecastDaysModel>> _forecastDays =
-      StreamController<List<ForecastDaysModel>>.broadcast();
+      StreamController<List<ForecastDaysModel>>();
 
   late Future<CurrentCityDataModel> _currentWeatherFuture;
 
@@ -56,8 +56,10 @@ class _HomeState extends State<Home> {
       _forecastDays.add(forecast);
     } on DioException catch (e) {
       _showError('Forecast unavailable (${e.response?.statusCode ?? 'network error'})');
+      _forecastDays.add(const []); // stop the loading dots
     } on StateError catch (e) {
       _showError(e.message);
+      _forecastDays.add(const []);
     }
   }
 
