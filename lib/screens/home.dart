@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
-import 'package:dio/dio.dart';
-import 'package:flutter/cupertino.dart';
+
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
-import 'package:progress_indicators/progress_indicators.dart';
-import 'package:weather/Model/CurrentCityDataModel.dart';
 import 'package:intl/intl.dart';
-import 'package:weather/Model/ForcastDaysModel.dart';
+
+import '../model/current_city_data_model.dart';
+import '../model/forecast_days_model.dart';
+import '../services/open_weather_service.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -17,21 +17,62 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> {
-  late StreamController<List<ForcastDaysModel>> StremForcastDays;
+  static const _defaultCity = 'Tehran';
 
-  late Future<CurrentCityDataModel> currentWeatherFuture;
-  var cityName;
-  var lat;
-  var lon;
-  TextEditingController textEditingController = TextEditingController();
+  final OpenWeatherService _service = OpenWeatherService();
+  final TextEditingController _searchController = TextEditingController();
+  final StreamController<List<ForecastDaysModel>> _forecastDays =
+      StreamController<List<ForecastDaysModel>>.broadcast();
+
+  late Future<CurrentCityDataModel> _currentWeatherFuture;
 
   @override
   void initState() {
-    // TODO: implement initState
     super.initState();
+    _currentWeatherFuture = _loadWeather(null);
+  }
 
-    currentWeatherFuture = SendRequestCurrentWeather(cityName);
-    StremForcastDays = StreamController<List<ForcastDaysModel>>();
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _forecastDays.close();
+    super.dispose();
+  }
+
+  /// Loads current conditions, then chains the 7-day forecast
+  /// for the returned coordinates.
+  Future<CurrentCityDataModel> _loadWeather(String? city) async {
+    final data = await _service.fetchCurrentWeather(
+      (city == null || city.trim().isEmpty) ? _defaultCity : city.trim(),
+    );
+    unawaited(_loadForecast(data.lat, data.lon));
+    return data;
+  }
+
+  Future<void> _loadForecast(double lat, double lon) async {
+    try {
+      final forecast = await _service.fetchSevenDayForecast(lat, lon);
+      if (!mounted) return;
+      _forecastDays.add(forecast);
+    } on DioException catch (e) {
+      _showError('Forecast unavailable (${e.response?.statusCode ?? 'network error'})');
+    } on StateError catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  void _searchCity() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _currentWeatherFuture = _loadWeather(_searchController.text);
+    });
+  }
+
+  void _showError(String? message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message ?? 'Something went wrong')),
+    );
   }
 
   @override
@@ -40,427 +81,379 @@ class _HomeState extends State<Home> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: const Text('Weather App'),
-        elevation: 15,
-        actions: <Widget>[
-          PopupMenuButton<String>(itemBuilder: (BuildContext context) {
-            return {'Setting', 'Profile', 'Logout'}.map((String Choice) {
-              return PopupMenuItem(
-                value: Choice,
-                child: Text(Choice),
-              );
-            }).toList();
-          })
-        ],
       ),
       body: FutureBuilder<CurrentCityDataModel>(
-        future: currentWeatherFuture,
+        future: _currentWeatherFuture,
         builder: (context, snapshot) {
-          if (snapshot.hasData) {
-            CurrentCityDataModel? cityDataModel = snapshot.data;
-            SendRequestSevenDaysForcast(lat, lon);
-            final formatter = DateFormat.jm();
-            var sunrise = formatter.format(
-                new DateTime.fromMicrosecondsSinceEpoch(
-                    cityDataModel!.sunrise * 1000,
-                    isUtc: true));
-            var sunset = formatter.format(
-                new DateTime.fromMicrosecondsSinceEpoch(
-                    cityDataModel.sunset * 1000,
-                    isUtc: true));
-            return Container(
-              decoration: BoxDecoration(
-                image: DecorationImage(
-                  fit: BoxFit.cover,
-                  image: AssetImage('images/pic_bg.jpg'),
-                ),
-              ),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.all(10),
-                        child: Row(
-                          children: [
-                            Padding(
-                              padding: EdgeInsets.only(right: 20),
-                              child: ElevatedButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      currentWeatherFuture = SendRequestCurrentWeather(textEditingController.text);
-                                    });
-                                  },
-                                  child: Text('Find')),
-                            ),
-                            Expanded(
-                                child: TextField(
-                              controller: TextEditingController(),
-                              decoration: InputDecoration(
-                                  hintText: 'enter you are city name',
-                                  hintStyle: TextStyle(color: Colors.white),
-                                  border: UnderlineInputBorder()),
-                              style: TextStyle(color: Colors.white),
-                            ))
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.only(top: 50),
-                        child: Text(cityDataModel!.cityName,
-                            style:
-                                TextStyle(color: Colors.white, fontSize: 35)),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.only(top: 20),
-                        child: Text(cityDataModel!.describtion,
-                            style: TextStyle(color: Colors.grey, fontSize: 20)),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.only(top: 30),
-                        child: setIconForMain(cityDataModel),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.only(top: 15),
-                        child: Text(
-                          cityDataModel!.temp.toString() + '\u00B0',
-                          style: TextStyle(color: Colors.white, fontSize: 60),
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Column(
-                            children: [
-                              Text(
-                                'max',
-                                style:
-                                    TextStyle(color: Colors.grey, fontSize: 20),
-                              ),
-                              SizedBox(
-                                height: 10,
-                              ),
-                              Text(
-                                cityDataModel!.temp_max.toString() + '\u00B0',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 20),
-                              )
-                            ],
-                          ),
-                          SizedBox(
-                            width: 10,
-                          ),
-                          Container(
-                            width: 1,
-                            height: 50,
-                            color: Colors.grey,
-                          ),
-                          SizedBox(
-                            width: 10,
-                          ),
-                          Column(
-                            children: [
-                              Text(
-                                'min',
-                                style:
-                                    TextStyle(color: Colors.grey, fontSize: 20),
-                              ),
-                              SizedBox(
-                                height: 10,
-                              ),
-                              Text(
-                                cityDataModel!.temp_min.toString() + '\u00B0',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 20),
-                              )
-                            ],
-                          ),
-                        ],
-                      ),
-                      SizedBox(
-                        height: 10,
-                      ),
-                      Padding(
-                        padding: EdgeInsets.all(5),
-                        child: Container(
-                          height: 1,
-                          width: double.infinity,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      Container(
-                        width: double.infinity,
-                        height: 100,
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 10),
-                          child: Center(
-                            child: StreamBuilder<List<ForcastDaysModel>>(
-                              stream: StremForcastDays.stream,
-                              builder: (context, snapshot) {
-                                if (snapshot.hasData) {
-                                  List<ForcastDaysModel>? forecastDays =
-                                      snapshot.data;
-                                  return ListView.builder(
-                                      shrinkWrap: true,
-                                      scrollDirection: Axis.horizontal,
-                                      itemCount: 7,
-                                      itemBuilder:
-                                          (BuildContext context, int pos) {
-                                        return listViewItem(
-                                            forecastDays![pos + 1]);
-                                      });
-                                } else {
-                                  return Center(
-                                    child: JumpingDotsProgressIndicator(
-                                      color: Colors.white,
-                                      fontSize: 100,
-                                      dotSpacing: 4,
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.all(5),
-                        child: Container(
-                          height: 1,
-                          width: double.infinity,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.only(top: 15),
-                            child: Column(
-                              children: [
-                                Text('wind speed',
-                                    style: TextStyle(
-                                        color: Colors.white, fontSize: 15)),
-                                SizedBox(
-                                  height: 5,
-                                ),
-                                Text(cityDataModel.windSpeed.toString() + 'm/s',
-                                    style: TextStyle(color: Colors.grey))
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.all(7),
-                            child: Container(
-                              height: 40,
-                              width: 1,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.only(left: 3, top: 15),
-                            child: Column(
-                              children: [
-                                Text(
-                                  'sunrise',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 15),
-                                ),
-                                SizedBox(
-                                  height: 5,
-                                ),
-                                Text(
-                                  sunrise,
-                                  style: TextStyle(color: Colors.grey),
-                                )
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.all(7),
-                            child: Container(
-                              height: 40,
-                              width: 1,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.only(left: 3, top: 15),
-                            child: Column(
-                              children: [
-                                Text(
-                                  'sunset',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 15),
-                                ),
-                                SizedBox(
-                                  height: 5,
-                                ),
-                                Text(
-                                  sunset,
-                                  style: TextStyle(color: Colors.grey),
-                                )
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.all(7),
-                            child: Container(
-                              height: 40,
-                              width: 1,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.only(left: 3, top: 15),
-                            child: Column(
-                              children: [
-                                Text(
-                                  'humidity',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 15),
-                                ),
-                                SizedBox(
-                                  height: 5,
-                                ),
-                                Text(
-                                  cityDataModel!.humidity.toString() +
-                                      '%'.toString(),
-                                  style: TextStyle(color: Colors.grey),
-                                )
-                              ],
-                            ),
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                ),
-              ),
-            );
-          } else {
-            return Center(
-              child: JumpingDotsProgressIndicator(
-                color: Colors.white,
-                fontSize: 100,
-                dotSpacing: 4,
-              ),
+          if (snapshot.hasError) {
+            return _ErrorView(
+              message: snapshot.error.toString(),
+              onRetry: () => setState(() {
+                _currentWeatherFuture = _loadWeather(_searchController.text);
+              }),
             );
           }
+          if (!snapshot.hasData) {
+            return const Center(child: JumpingDots());
+          }
+
+          final cityData = snapshot.data!;
+          return _WeatherContent(
+            city: cityData,
+            forecastStream: _forecastDays.stream,
+            searchController: _searchController,
+            onSearch: _searchCity,
+          );
         },
       ),
     );
   }
+}
 
-  Container listViewItem(ForcastDaysModel forecastDay) {
+class _WeatherContent extends StatelessWidget {
+  const _WeatherContent({
+    required this.city,
+    required this.forecastStream,
+    required this.searchController,
+    required this.onSearch,
+  });
+
+  final CurrentCityDataModel city;
+  final Stream<List<ForecastDaysModel>> forecastStream;
+  final TextEditingController searchController;
+  final VoidCallback onSearch;
+
+  static String _formatTime(int unixSeconds) {
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(
+      unixSeconds * 1000,
+      isUtc: true,
+    ).toLocal();
+    return DateFormat.jm().format(dateTime);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sunrise = _formatTime(city.sunrise);
+    final sunset = _formatTime(city.sunset);
+
     return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          fit: BoxFit.cover,
+          image: AssetImage('images/pic_bg.jpg'),
+        ),
+      ),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: SafeArea(
+          child: Center(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 20),
+                        child: ElevatedButton(
+                          onPressed: onSearch,
+                          child: const Text('Find'),
+                        ),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: searchController,
+                          onSubmitted: (_) => onSearch(),
+                          textInputAction: TextInputAction.search,
+                          decoration: const InputDecoration(
+                            hintText: 'enter your city name',
+                            border: UnderlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: Text(
+                    '${city.cityName}, ${city.country}',
+                    style: const TextStyle(color: Colors.white, fontSize: 35),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    city.description,
+                    style: const TextStyle(color: Colors.grey, fontSize: 20),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: _weatherIcon(city.description),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    '${city.temp.round()}\u00B0',
+                    style: const TextStyle(color: Colors.white, fontSize: 60),
+                  ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _labeledValue('max', '${city.tempMax.round()}\u00B0'),
+                    const _VerticalDivider(),
+                    _labeledValue('min', '${city.tempMin.round()}\u00B0'),
+                  ],
+                ),
+                const _HorizontalDivider(),
+                SizedBox(
+                  height: 100,
+                  width: double.infinity,
+                  child: Center(
+                    child: StreamBuilder<List<ForecastDaysModel>>(
+                      stream: forecastStream,
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const JumpingDots(fontSize: 40);
+                        }
+                        final forecastDays = snapshot.data!;
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          scrollDirection: Axis.horizontal,
+                          itemCount: forecastDays.length,
+                          itemBuilder: (context, index) =>
+                              _ForecastDayItem(forecast: forecastDays[index]),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const _HorizontalDivider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _labeledValue('wind speed', '${city.windSpeed} m/s'),
+                    const _VerticalDivider(height: 40),
+                    _labeledValue('sunrise', sunrise),
+                    const _VerticalDivider(height: 40),
+                    _labeledValue('sunset', sunset),
+                    const _VerticalDivider(height: 40),
+                    _labeledValue('humidity', '${city.humidity}%'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _labeledValue(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.all(7),
+      child: Column(
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white, fontSize: 15)),
+          const SizedBox(height: 5),
+          Text(value, style: const TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Image _weatherIcon(String description) {
+    if (description == 'clear sky') {
+      return const Image(image: AssetImage('images/icons8-sun-96.png'));
+    } else if (description == 'few clouds') {
+      return const Image(
+        image: AssetImage('images/icons8-partly-cloudy-day-80.png'),
+      );
+    } else if (description.contains('clouds')) {
+      return const Image(image: AssetImage('images/icons8-clouds-80.png'));
+    } else if (description.contains('thunderstorm')) {
+      return const Image(image: AssetImage('images/icons8-storm-80.png'));
+    } else if (description.contains('drizzle')) {
+      return const Image(image: AssetImage('images/icons8-rain-cloud-80.png'));
+    } else if (description.contains('rain')) {
+      return const Image(image: AssetImage('images/icons8-heavy-rain-80.png'));
+    } else if (description.contains('snow')) {
+      return const Image(image: AssetImage('images/icons8-snow-80.png'));
+    } else {
+      return const Image(
+        image: AssetImage('images/icons8-windy-weather-80.png'),
+      );
+    }
+  }
+}
+
+class _ForecastDayItem extends StatelessWidget {
+  const _ForecastDayItem({required this.forecast});
+
+  final ForecastDaysModel forecast;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
       width: 70,
-      height: 50,
       child: Card(
-        shadowColor: Colors.transparent,
         color: Colors.transparent,
+        shadowColor: Colors.transparent,
         child: Column(
           children: [
             Text(
-              forecastDay.dataTime,
-              style: TextStyle(color: Colors.grey, fontSize: 15),
+              _formatDayStatic(forecast.dataTime),
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
             ),
-            Expanded(child: setIconForMain(forecastDay)),
-            Text(forecastDay.temp.round().toString() + '\u00B0',
-                style: TextStyle(color: Colors.white, fontSize: 20)),
+            Expanded(
+              child: _iconFor(forecast.description),
+            ),
+            Text(
+              '${forecast.temp.round()}\u00B0',
+              style: const TextStyle(color: Colors.white, fontSize: 18),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Image setIconForMain(model) {
-    String description = model.description;
+  static String _formatDayStatic(int unixSeconds) {
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(
+      unixSeconds * 1000,
+      isUtc: true,
+    ).toLocal();
+    return DateFormat.MMMd().format(dateTime);
+  }
 
-    if (description == 'clear sky') {
-      return Image(image: AssetImage('images/icons8-sun-96.png'));
-    } else if (description == 'few clouds') {
-      return Image(image: AssetImage('images/icons8-partly-cloudy-day-80.png'));
-    } else if (description.contains('clouds')) {
-      return Image(image: AssetImage('images/icons8-clouds-80.png'));
-    } else if (description.contains('thunderstorm')) {
-      return Image(image: AssetImage('images/icons8-storm-80.png'));
-    } else if (description.contains('drizzle')) {
-      return Image(image: AssetImage('images/icons8-clouds-80.png'));
+  static Image _iconFor(String description) {
+    if (description.contains('clear')) {
+      return const Image(image: AssetImage('images/icons8-sun-96.png'));
+    } else if (description.contains('cloud')) {
+      return const Image(image: AssetImage('images/icons8-clouds-80.png'));
     } else if (description.contains('rain')) {
-      return Image(image: AssetImage('images/icons8-heavy-rain-80.png'));
+      return const Image(image: AssetImage('images/icons8-heavy-rain-80.png'));
     } else if (description.contains('snow')) {
-      return Image(image: AssetImage('images/icons8-snow-80.png'));
+      return const Image(image: AssetImage('images/icons8-snow-80.png'));
     } else {
-      return Image(image: AssetImage('icons8-windy-weather-80.png'));
+      return const Image(
+        image: AssetImage('images/icons8-windy-weather-80.png'),
+      );
     }
   }
+}
 
-  Future<CurrentCityDataModel> SendRequestCurrentWeather(cityName) async {
-    var apiKey = 'f2f757a839a4b06a62fc153e8d9dbf6c';
+class _VerticalDivider extends StatelessWidget {
+  const _VerticalDivider({this.height = 50});
 
-    var response = await Dio().get(
-        'https://api.openweathermap.org/data/2.5/weatherr',
-        queryParameters: {'q': cityName, 'appid': apiKey, 'units': 'metric'});
+  final double height;
 
-    cityName = response.data["name"];
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 1, height: height, color: Colors.grey);
+  }
+}
 
-    var dataModel = CurrentCityDataModel(
-        response.data["name"],
-        response.data["coord"]["lon"],
-        response.data["coord"]["lat"],
-        response.data["weather"][0]["main"],
-        response.data["weather"][0]["description"],
-        response.data["main"]["temp"],
-        response.data["main"]["temp_max"],
-        response.data["main"]["temp_min"],
-        response.data["main"]["pressure"],
-        response.data["main"]["humidity"],
-        response.data["dt"],
-        response.data["sys"]["country"],
-        response.data["sys"]["sunrise"],
-        response.data["wind"]["speed"],
-        response.data["sys"]["sunset"]);
+class _HorizontalDivider extends StatelessWidget {
+  const _HorizontalDivider();
 
-    return dataModel;
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(5),
+      child: SizedBox(height: 1, width: double.infinity, child: ColoredBox(color: Colors.grey)),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A dependency-free replacement for the abandoned
+/// `progress_indicators` package — three pulsing dots.
+class JumpingDots extends StatefulWidget {
+  const JumpingDots({super.key, this.fontSize = 60, this.color = Colors.white});
+
+  final double fontSize;
+  final Color color;
+
+  @override
+  State<JumpingDots> createState() => _JumpingDotsState();
+}
+
+class _JumpingDotsState extends State<JumpingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  void SendRequestSevenDaysForcast(lon, lat) async {
-    List<ForcastDaysModel> list = [];
-    var apiKey = 'f2f757a839a4b06a62fc153e8d9dbf6c';
-
-    try {
-      var response = await Dio().get(
-          'https://api.openweathermap.org/data/3.0/onecall',
-          queryParameters: {
-            'lat': lat,
-            'lon': lon,
-            'exclude': 'minutely , hourly',
-            'appid': apiKey,
-            'unit': 'metric'
-          });
-      final formatter = DateFormat.MMMd();
-      for (int i = 1; i <= 8; i++) {
-        var model = response.data['daily'][i];
-
-        var dt = formatter.format(new DateTime.fromMillisecondsSinceEpoch(
-            model['dt'] * 1000,
-            isUtc: true));
-
-        ForcastDaysModel forcastDaysModel = ForcastDaysModel(
-            dt,
-            model['temp']['day'],
-            model['weather'][0]['maim'],
-            model['weather'][0]['describtion']);
-        list.add(forcastDaysModel);
-      }
-      StremForcastDays.add(list);
-    } on DioError catch (e) {
-      print(e.response?.statusCode);
-      print(e.message);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('there is an'),
-      ));
-    }
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(3, (index) {
+        final start = index / 3;
+        final curve = CurvedAnimation(
+          parent: _controller,
+          curve: Interval(start, (start + 0.5).clamp(0.0, 1.0),
+              curve: Curves.easeInOut),
+        );
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.2, end: 1.0).animate(curve),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              '\u2022',
+              style: TextStyle(
+                color: widget.color,
+                fontSize: widget.fontSize,
+                height: 1,
+              ),
+            ),
+          ),
+        );
+      }),
+    );
   }
 }
