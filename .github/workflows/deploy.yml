@@ -1,0 +1,72 @@
+name: Build & Publish
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  publish:
+    name: Build web & APK, publish Pages + Release
+    needs: quality
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - run: flutter pub get
+      - name: Build web demo
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+      - name: Build Android APK
+        run: flutter build apk --release
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+      - name: Publish release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: ${{ github.event.repository.name }} v1.0.${{ github.run_number }}
+          body: |
+            Automated release built from ${{ github.sha }}.
+
+            - 🌐 Web demo: ${{ steps.deploy.outputs.page_url }}
+            - 🤖 Android: download `app-release.apk` below and install it on your device.
+          files: build/app/outputs/flutter-apk/app-release.apk
