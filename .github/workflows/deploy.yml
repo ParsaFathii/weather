@@ -52,15 +52,6 @@ jobs:
         run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
       - name: Build Android APK
         run: flutter build apk --release
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: build/web
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
       - name: Publish release with APK
         uses: softprops/action-gh-release@v2
         with:
@@ -69,6 +60,19 @@ jobs:
           body: |
             Automated release built from ${{ github.sha }}.
 
-            - 🌐 Web demo: ${{ steps.deploy.outputs.page_url }}
             - 🤖 Android: download `app-release.apk` below and install it on your device.
+            - 🌐 Web demo: ${{ steps.deploy.outputs.page_url || format('https://ParsaFathii.github.io/{0}/', github.event.repository.name) }}
           files: build/app/outputs/flutter-apk/app-release.apk
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true # needs repo Settings -> Pages -> Source: GitHub Actions (one-time, manual)
+      - name: Upload web artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+        continue-on-error: true
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
