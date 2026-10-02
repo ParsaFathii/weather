@@ -14,13 +14,25 @@ const String _openWeatherApiKey = String.fromEnvironment('OPENWEATHER_API_KEY');
 /// Thin client around the OpenWeatherMap REST endpoints.
 class OpenWeatherService {
   /// [apiKey] is injectable for tests; production reads it from
-  /// `--dart-define=OPENWEATHER_API_KEY`.
+  /// `--dart-define=OPENWEATHER_API_KEY` (or from the in-app key dialog,
+  /// which overrides it at runtime — see `Home`).
   OpenWeatherService({Dio? dio, String? apiKey})
       : _dio = dio ?? Dio(),
-        _apiKey = apiKey ?? _openWeatherApiKey;
+        _apiKey = (apiKey != null && apiKey.isNotEmpty)
+            ? apiKey
+            : _openWeatherApiKey;
 
   final Dio _dio;
-  final String _apiKey;
+
+  /// The key actually used for requests. mutable so the user can paste
+  /// their own free key inside the app without rebuilding it.
+  String _apiKey;
+
+  /// Replaces the API key used by subsequent requests.
+  set apiKey(String value) => _apiKey = value.trim();
+
+  /// Whether a key is configured (from `--dart-define` or the dialog).
+  bool get hasApiKey => _apiKey.isNotEmpty;
 
   static const String _currentWeatherUrl =
       'https://api.openweathermap.org/data/2.5/weather';
@@ -72,10 +84,10 @@ class OpenWeatherService {
   }
 
   void _ensureApiKey() {
-    if (_apiKey.isEmpty) {
+    if (!hasApiKey) {
       throw StateError(
-        'OPENWEATHER_API_KEY is missing. Start the app with '
-        '--dart-define=OPENWEATHER_API_KEY=<your key>',
+        'No OpenWeatherMap API key set yet — use the key button in the app '
+        'bar to paste your free key from openweathermap.org/api',
       );
     }
   }

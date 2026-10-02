@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/current_city_data_model.dart';
 import '../model/forecast_days_model.dart';
@@ -18,18 +19,40 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   static const _defaultCity = 'Tehran';
+  static const _storedApiKeyPref = 'openweather_api_key';
 
   final OpenWeatherService _service = OpenWeatherService();
   final TextEditingController _searchController = TextEditingController();
   final StreamController<List<ForecastDaysModel>> _forecastDays =
       StreamController<List<ForecastDaysModel>>();
 
-  late Future<CurrentCityDataModel> _currentWeatherFuture;
+  /// Null while the stored API key (if any) is being restored at startup.
+  Future<CurrentCityDataModel>? _currentWeatherFuture;
 
   @override
   void initState() {
     super.initState();
-    _currentWeatherFuture = _loadWeather(null);
+    _restoreApiKeyAndLoad();
+  }
+
+  /// Restores a user-supplied key saved by the in-app dialog, then loads
+  /// the first weather data. Keys passed via `--dart-define` still work:
+  /// they are only overridden once the user saves their own key in-app.
+  Future<void> _restoreApiKeyAndLoad() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedKey = prefs.getString(_storedApiKeyPref);
+      if (storedKey != null && storedKey.isNotEmpty) {
+        _service.apiKey = storedKey;
+      }
+    } catch (_) {
+      // Storage unavailable (e.g. some web contexts) — fall through and
+      // use whatever key was compiled in.
+    }
+    if (!mounted) return;
+    setState(() {
+      _currentWeatherFuture = _loadWeather(null);
+    });
   }
 
   @override
@@ -77,22 +100,93 @@ class _HomeState extends State<Home> {
     );
   }
 
+  /// Lets the user paste their own free OpenWeatherMap key at runtime —
+  /// persisted in [SharedPreferences] so it survives restarts. This is what
+  /// makes the release APK usable by anyone, without shipping a key.
+  Future<void> _showApiKeyDialog() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('OpenWeatherMap API key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Create a free key at openweathermap.org/api, then paste it here:',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'your 32-character key',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final key = result?.trim() ?? '';
+    if (key.isEmpty) return;
+
+    _service.apiKey = key;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_storedApiKeyPref, key);
+    } catch (_) {
+      // Storage unavailable — the key still works for this session.
+    }
+    if (!mounted) return;
+    setState(() {
+      _currentWeatherFuture = _loadWeather(null);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: const Text('Weather App'),
+        actions: [
+          IconButton(
+            tooltip: 'Set OpenWeatherMap API key',
+            icon: const Icon(Icons.key),
+            onPressed: _showApiKeyDialog,
+          ),
+        ],
       ),
       body: FutureBuilder<CurrentCityDataModel>(
         future: _currentWeatherFuture,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
+            final missingKey = snapshot.error is StateError;
             return _ErrorView(
-              message: snapshot.error.toString(),
+              message: missingKey
+                  ? 'No OpenWeatherMap API key set yet.\n'
+                      'Grab a free one at openweathermap.org/api and paste it '
+                      'with the key button in the top bar.'
+                  : snapshot.error.toString(),
               onRetry: () => setState(() {
                 _currentWeatherFuture = _loadWeather(_searchController.text);
               }),
+              onSetKey: _showApiKeyDialog,
             );
           }
           if (!snapshot.hasData) {
@@ -372,10 +466,15 @@ class _HorizontalDivider extends StatelessWidget {
 }
 
 class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
+  const _ErrorView({
+    required this.message,
+    required this.onRetry,
+    this.onSetKey,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback? onSetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -398,6 +497,15 @@ class _ErrorView extends StatelessWidget {
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
             ),
+            if (onSetKey != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: FilledButton.tonalIcon(
+                  onPressed: onSetKey,
+                  icon: const Icon(Icons.key),
+                  label: const Text('Set API key'),
+                ),
+              ),
           ],
         ),
       ),

@@ -13,6 +13,22 @@
 
 ---
 
+## 📲 Try it · امتحانش کنید
+
+| 🤖 **Android APK** · نسخهٔ اندروید | **[Latest release](https://github.com/ParsaFathii/weather/releases/latest)** — download `app-release.apk` · فایل `app-release.apk` را دانلود کنید |
+| 🔑 **Free API key** · کلید رایگان | The app asks for your own OpenWeatherMap key on first launch (or via the key button) — create one for free at [openweathermap.org/api](https://openweathermap.org/api) · اپ کلید OpenWeatherMap شما را می‌پرسد؛ رایگان از سایت بگیرید |
+
+---
+
+## 📸 Screenshots · اسکرین‌شات‌ها
+
+<p align="center">
+  <img src="docs/images/home.png" width="240" alt="weather — Current conditions + 7-day forecast for the searched city">
+  <img src="docs/images/api_key_dialog.png" width="240" alt="weather — Paste your own free OpenWeatherMap key right in the app">
+</p>
+
+---
+
 ## 🇬🇧 English
 
 My first app that talks to a **real REST API**: search any city and get its current temperature, condition, min/max, wind speed, humidity, sunrise/sunset — plus a horizontal 7-day forecast strip.
@@ -29,7 +45,7 @@ This repository is also a small case study in **reviving broken code**. The orig
 | 4 | `lat`/`lon` were never assigned from the response, and were swapped between call site and function | Coordinates flow: current weather → forecast request |
 | 5 | The forecast request was fired from inside `build()` on every rebuild | Chained once per load, errors surface via SnackBar |
 | 6 | `progress_indicators` package is incompatible with Dart 3 → `pub get` failed | Replaced with a built-in animated `JumpingDots` widget |
-| 7 | API key hard-coded in source (in a public repo!) | Key supplied at runtime via `--dart-define` |
+| 7 | API key hard-coded in source (in a public repo!) | Key supplied at runtime via `--dart-define` **or the in-app key dialog** (stored with `shared_preferences`) |
 | 8 | Sunrise/sunset parsed with `fromMicrosecondsSinceEpoch` (1000× off) | `fromMillisecondsSinceEpoch(..., isUtc: true).toLocal()` |
 
 ### ✨ What's inside
@@ -57,6 +73,11 @@ flutter run --dart-define=OPENWEATHER_API_KEY=<your_key>
 flutter pub get
 flutter run --dart-define=OPENWEATHER_API_KEY=<your_key>
 ```
+
+No key at build time? No problem — the app now has an **in-app key dialog**
+(key icon in the app bar): paste your free OpenWeatherMap key there, it is
+stored on-device and survives restarts. That is also what makes the
+downloadable APK usable by anyone.
 
 ### 🧪 Test it
 
@@ -97,6 +118,11 @@ flutter run --dart-define=OPENWEATHER_API_KEY=<کلید_شما>
 flutter pub get
 flutter run --dart-define=OPENWEATHER_API_KEY=<کلید_شما>
 ```
+
+کلید ندارید؟ مشکلی نیست — اپ الان یک **دیالوگ درون‌برنامه‌ای برای وارد کردن کلید**
+دارد (آیکون کلید در نوار بالا): کلید رایگان OpenWeatherMap خود را همان‌جا بچسبانید؛
+روی دستگاه ذخیره می‌شود و بعد از بستن اپ هم می‌ماند. همین قابلیت باعث می‌شود
+فایل APK قابل دانلود برای هر کسی قابل استفاده باشد.
 
 ---
 

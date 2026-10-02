@@ -37,6 +37,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   dio: ^5.11.1
   intl: ^0.20.3
+  shared_preferences: ^2.5.4
 
 
 dev_dependencies:
